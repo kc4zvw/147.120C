@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+  <meta name="generator" content="HTML Tidy, see www.w3.org">
+  <meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+  <link rel="stylesheet" type="text/css" href="css/styles.css">
+
+  <title>Keyer source code</title>
+
+  <style type="text/css">
+    div.c1 {margin-left: 2em}
+  </style>
+</head>
+
+<body>
+  <h1 class="www_title">Keyer source code</h1>
+
+  <h2 class="www_sectiontitle">Introduction</h2>
+
+  <p class="c1">add something here</p>
+
+  <h2 class="www_subsection">Materials:</h2>
+
+  <p class="c1">add something here</p>
+
+  <br />
+  <br />
+
+<pre>
+
+<span style="color: #7E7E7E;">/*</span>
+<span style="color:
+#7E7E7E;">    Based  on  code  written  by  Mark  VandeWettering,  K6HX,  as  found  on  his  web  site:</span>
+<span style="color: #7E7E7E;">  </span>
+<span style="color: #7E7E7E;">  http://brainwagon.org/2012/01/21/an-arduino-powered-ibm-ps2-morse-keyboard/</span>
+<span style="color: #7E7E7E;">  </span>
+<span style="color: #7E7E7E;">  You  need  four  connections  from  the  PS2  keyboard:  </span>
+<span style="color: #7E7E7E;">  </span>
+<span style="color:
+#7E7E7E;">  5V                Connects  to  pin  4  of  the  PS2  connector  (and  to  5v  on  the  Arduino  board)</span>
+<span style="color:
+#7E7E7E;">  ground                        "              3                  "                        (and  to  GND  on  the  Arduino  board)</span>
+<span style="color:
+#7E7E7E;">  clock                          "              5                  "                        (and  to  pin  3  on  the  Arduino  board)</span>
+<span style="color:
+#7E7E7E;">  data                            "              1                  "                        (        "            4                  "                      )</span>
+<span style="color: #7E7E7E;">  </span>
+<span style="color:
+#7E7E7E;">  Pins  2  and  6  of  the  PS2  connector  are  not  used.  </span>
+<span style="color: #7E7E7E;">  </span>
+<span style="color: #7E7E7E;">  Modified  by  Dr.  Jack  Purdum,  W8TEE,  Dec.  23,  2014</span>
+<span style="color: #7E7E7E;">  </span>
+<span style="color: #7E7E7E;">  */</span>
+
+<span style="color: #7E7E7E;">//  Version  for  the  PS2  Keyboard</span>
+<span style="color:
+#7E7E7E;">//  using  the  library  from  http://www.pjrc.com/teensy/td_libs_PS2Keyboard.html</span>
+
+#include  &lt;<span style="color: #CC6600;">PS2Keyboard</span>.h&gt;    <span style="color: #7E7E7E;">// See above</span>
+#include  &lt;<span style="color: #CC6600;">Wire</span>.h&gt;           <span style="color: #7E7E7E;">// Comes with Arduino
+IDE</span>
+<span style="color: #7E7E7E;">//  Get  the  LCD  I2C  Library  here:  </span>
+<span style="color: #7E7E7E;">//  https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads</span>
+<span style="color:
+#7E7E7E;">//  Move  any  other  LCD  libraries  to  another  folder  or  delete  them</span>
+<span style="color: #7E7E7E;">//  See  Library  "Docs"  folder  for  possible  commands  etc.</span>
+#include  &lt;<span style="color: #CC6600;">LiquidCrystal_I2C</span>.h&gt;
+
+<span style="color: #7E7E7E;">/*-----(  Declare  Constants  )-----*/</span>
+<span style="color: #7E7E7E;">/*-----(  Deefine  objects  )-----*/</span>
+<span style="color:
+#7E7E7E;">//  set  the  LCD  address  to  0x27  for  a  20  chars  4  line  display</span>
+<span style="color:
+#7E7E7E;">//  Set  the  pins  on  the  I2C  chip  used  for  LCD  connections:</span>
+<span style="color:
+#7E7E7E;">//                                        addr,  en,rw,rs,d4,d5,d6,d7,bl,blpol</span>
+<span style="color: #CC6600;">LiquidCrystal_I2C</span> lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  <span style="color:
+#7E7E7E;">// Set the LCD I2C address</span>
+
+#define  DEBUG                      1        <span style="color:
+#7E7E7E;">// For debugging statements. Comment out when </span>
+                                                          <span
+style="color: #7E7E7E;">// not debugging and reduce code size</span>
+                                                          
+#define  CHARSONLY              1        <span style="color: #7E7E7E;">// Only show
+characters, not code</span>
+
+#define  PS2CLOCKPIN          3
+#define  PS2DATAPIN            4
+
+
+#define  SIDETONEFREQ        700
+#define  ESCAPEKEY                27
+#define  PERCENTKEY              37
+#define  BACKSPACE              127            <span style="color:
+#7E7E7E;">// NOTE: This should be 0x08, but my keyboard sees it as 0x7F??</span>
+#define  NEWLINE                  <span style="color: #006699;">'\n'</span>
+
+#define  LEDPIN                      13
+#define  TONEPIN                    10            <span
+style="color: #7E7E7E;">// Used if you want sidetone via a small buzzer</span>
+#define  LCDROWSIZE                2
+#define  LCDCOLSIZE              16
+
+#define  QUEUESIZE                128
+#define  QUEUEMASK  (QUEUESIZE-1)
+
+#define  DEFAULTWPM	15	<span style="color: #7E7E7E;">// MIN_WPM &lt;= DEFAULT_WPM &lt;= MAX_WPM</span>
+#define	MINWPM		  5
+#define  MAXWPM		50
+#define  NOCHARAVAILABLE  -1
+<span style="color:
+#7E7E7E;">//  =========================  Global  data  definitions  =====================</span>
+
+<span style="color:
+#7E7E7E;">//  The  coded  byte  values  for  the  letters  of  the  alphabet.</span>
+<span style="color: #CC6600;">char</span> ltab[] = {
+    0b101,                            <span style="color:
+#7E7E7E;">// A</span>
+    0b11000,                        <span style="color: #7E7E7E;">// B
+</span>
+    0b11010,                        <span style="color: #7E7E7E;">//
+C</span>
+    0b1100,                          <span style="color: #7E7E7E;">//
+D</span>
+    0b10,                              <span style="color:
+#7E7E7E;">// E</span>
+    0b10010,                        <span style="color: #7E7E7E;">//
+F</span>
+    0b1110,                          <span style="color: #7E7E7E;">//
+G</span>
+    0b10000,                        <span style="color: #7E7E7E;">//
+H</span>
+    0b100,                            <span style="color:
+#7E7E7E;">// I</span>
+    0b10111,                        <span style="color: #7E7E7E;">//
+J</span>
+    0b1101,                          <span style="color: #7E7E7E;">//
+K</span>
+    0b10100,                        <span style="color: #7E7E7E;">//
+L</span>
+    0b111,                            <span style="color:
+#7E7E7E;">// M</span>
+    0b110,                            <span style="color:
+#7E7E7E;">// N</span>
+    0b1111,                          <span style="color: #7E7E7E;">//
+O</span>
+    0b10110,                        <span style="color: #7E7E7E;">//
+P</span>
+    0b11101,                        <span style="color: #7E7E7E;">//
+Q</span>
+    0b1010,                          <span style="color: #7E7E7E;">//
+R</span>
+    0b1000,                          <span style="color: #7E7E7E;">//
+S</span>
+    0b11,                              <span style="color:
+#7E7E7E;">// T</span>
+    0b1001,                          <span style="color: #7E7E7E;">//
+U</span>
+    0b10001,                        <span style="color: #7E7E7E;">//
+V</span>
+    0b1011,                          <span style="color: #7E7E7E;">//
+W</span>
+    0b11001,                        <span style="color: #7E7E7E;">//
+X</span>
+    0b11011,                        <span style="color: #7E7E7E;">//
+Y</span>
+    0b11100                          <span style="color: #7E7E7E;">//
+Z</span>
+};
+
+<span style="color:
+#7E7E7E;">//  The  coded  byte  values  for  numbers.  See  text  for  explanation</span>
+
+<span style="color: #CC6600;">char</span> ntab[] = {
+    0b111111,                      <span style="color: #7E7E7E;">// 0</span>
+    0b101111,                      <span style="color: #7E7E7E;">// 1</span>
+    0b100111,                      <span style="color: #7E7E7E;">// 2</span>
+    0b100011,                      <span style="color: #7E7E7E;">// 3</span>
+    0b100001,                      <span style="color: #7E7E7E;">// 4</span>
+    0b100000,                      <span style="color: #7E7E7E;">// 5</span>
+    0b110000,                      <span style="color: #7E7E7E;">// 6</span>
+    0b111000,                      <span style="color: #7E7E7E;">// 7</span>
+    0b111100,                      <span style="color: #7E7E7E;">// 8</span>
+    0b111110                        <span style="color: #7E7E7E;">//
+9</span>
+};
+
+
+<span style="color: #CC6600;">char</span> buff[QUEUESIZE];
+<span style="color: #CC6600;">char</span> buffFullError[] = <span style="color: #006699;">"== Buffer Full =="</span>;
+<span style="color: #CC6600;">char</span> charsLeftMsg[] = <span style="color: #006699;">"chars left:"</span>;
+<span style="color: #CC6600;">byte</span> lcdColPosition;
+<span style="color: #CC6600;">byte</span> bufferActive;
+
+<span style="color: #CC6600;">int</span> aborted = 0;
+<span style="color: #CC6600;">int</span> bufferHead = 0;
+<span style="color: #CC6600;">int</span> bufferTail = 0;
+<span style="color: #CC6600;">int</span> charsLeft;
+<span style="color: #CC6600;">int</span> charCount = 0;
+
+<span style="color: #CC6600;">int</span> wordsPerMinute = DEFAULTWPM;         <span style="color: #7E7E7E;">// Default speed</span>
+<span style="color: #CC6600;">boolean</span> sideTone = <span style="color: #CC6600;">false</span>;                <span
+style="color: #7E7E7E;">// Default is no sidetone</span>
+<span style="color: #CC6600;">boolean</span>	speedChange = <span style="color: #CC6600;">false</span>;	         <span
+style="color: #7E7E7E;">// 'true' indicates speed change requested</span>
+
+<span style="color: #CC6600;">int</span> ditlen = 1200 / wordsPerMinute;
+
+<span style="color: #CC6600;">PS2Keyboard</span> kbd;        <span style="color: #7E7E7E;">// Define keyboard object</span>
+
+<span style="color: #CC6600;">void</span> <span style="color: #CC6600;"><b>setup</b></span>()
+{
+    <span style="color: #CC6600;">pinMode</span>(LEDPIN, <span style="color: #006699;">OUTPUT</span>);
+    <span style="color: #CC6600;">pinMode</span>(TONEPIN, <span style="color: #006699;">OUTPUT</span>);
+    
+    kbd.<span style="color: #CC6600;">begin</span>(PS2DATAPIN, PS2CLOCKPIN);
+    lcd.<span style="color: #CC6600;">begin</span>(LCDCOLSIZE, LCDROWSIZE);   <span style="color: #7E7E7E;">// initialize
+the lcd for 16 chars 2 lines, turn on backlight</span>
+    
+    lcd.setCursor(2,0);                                      <span
+style="color: #7E7E7E;">// Splash screen</span>
+    lcd.<span style="color: #CC6600;">print</span>(<span style="color: #006699;">"PS2 Keyboard"</span>);
+    lcd.setCursor(6,1);
+    lcd.<span style="color: #CC6600;">print</span>(<span style="color: #006699;">"W8TEE"</span>);
+    <span style="color: #CC6600;">delay</span>(2000);  
+<span style="color: #7E7E7E;">//    lcd.clear();</span>
+    lcdColPosition  =  0;
+    
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">begin</span>(115200);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">println</span>(<span style="color:
+#006699;">"PS2 keyboard ready:"</span>); 
+#endif
+    bufferActive  =  0;        <span style="color: #7E7E7E;">// Assume no buffering </span>
+}
+
+<span style="color: #CC6600;">void</span> <span style="color: #CC6600;"><b>loop</b></span>()
+{
+    ps2poll();                                                    <span
+style="color: #7E7E7E;">// Look for a keystroke</span>
+
+    <span style="color: #CC6600;">if</span> (bufferHead != bufferTail) {     <span style="color: #7E7E7E;">// If there's a
+keystroke present in the buffer...</span>
+        <span style="color: #CC6600;">send</span>(BufferPopCharacter());       <span style="color: #7E7E7E;">//
+...send it along.</span>
+    }    
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color: #7E7E7E;">  *  This  method  adds  a  character  to  the  buffer.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color:
+#7E7E7E;">  *  char  ch            the  character  to  add</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> BufferAdd(<span style="color: #CC6600;">char</span> ch)
+{
+    buff[bufferTail++]  =  ch;
+    bufferTail  &amp;=  QUEUEMASK;      
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  adds  a  character  to  the  buffer.  See  text  as  to  how  this  method  shares  the  same  method  name  as</span>
+<span style="color:
+#7E7E7E;">  *  the  one  above  without  creating  a  duplicate  definition  error</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color:
+#7E7E7E;">  *  char  ch            the  character  to  add</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *</span>
+<span style="color:
+#7E7E7E;">  *    CAUTION:  If  any  part  of  an  existing  message  is  in  the  buufer  when  this  function  is  called,  it  is  lost.</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> BufferAdd(<span style="color: #CC6600;">char</span> *s)
+{
+
+    <span style="color: #CC6600;">int</span> len;
+    len  =  strlen(s);
+    <span style="color: #CC6600;">if</span> (len &gt; QUEUEMASK) { <span style="color: #7E7E7E;">// If the message is too
+long, kill it.</span>
+        *s  =  <span style="color: #006699;">'\0'</span>;
+        <span style="color: #CC6600;">return</span>;
+    }
+    BufferReset();                  <span style="color: #7E7E7E;">// Override anything
+in buffer  </span>
+    <span style="color: #CC6600;">while</span> (*s)
+        BufferAdd(*s++);
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  removes  a  character  from  the  buffer.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color:
+#7E7E7E;">  *  char                the  character  that  is  copied  from  the  buffer</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">char</span> BufferPopCharacter()
+{
+    <span style="color: #CC6600;">char</span> ch;
+    ch  =  buff[bufferHead++];
+    bufferHead  &amp;=  QUEUEMASK;
+    <span style="color: #CC6600;">return</span> ch;
+}
+
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color: #7E7E7E;">  *  This  method  reset  the  buffer.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> BufferReset()
+{
+    bufferHead  =  0;                                <span
+style="color: #7E7E7E;">// Reset to first character in buffer</span>
+    bufferTail  =  0;
+    charCount  =  0;
+    memset(buff,  0,  QUEUESIZE);        <span style="color: #7E7E7E;">// Fast clear of previous
+contents</span>
+    lcdColPosition  =  0;
+    lcd.clear();
+    lcd.setCursor(0,  0);
+    lcd.<span style="color: #CC6600;">write</span>(charsLeftMsg);
+
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  function  lets  you  observe  the  keystrokes  as  they  are  sent.  With  buzzer,  it</span>
+<span style="color: #7E7E7E;">  *  syncs  with  display.</span>
+<span style="color: #7E7E7E;">  *</span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+
+<span style="color: #CC6600;">void</span> ShowKeystrokes(<span style="color: #CC6600;">char</span> ch)
+{
+    <span style="color: #CC6600;">static</span> <span style="color: #CC6600;">char</span> tempBuffer[LCDCOLSIZE + 1];
+    
+    ch  =  toupper(ch);                                        <span
+style="color: #7E7E7E;">// Don't mess with lower case</span>
+    charsLeft  =  QUEUESIZE  -  bufferTail;    <span style="color: #7E7E7E;">// How much buffer
+space left?</span>
+    lcd.setCursor(0,  0);
+    lcd.<span style="color: #CC6600;">write</span>(charsLeftMsg); 
+    lcd.<span style="color: #CC6600;">write</span>(<span style="color: #006699;">"   "</span>);
+    lcd.setCursor(11,  0);
+    lcd.<span style="color: #CC6600;">print</span>(charsLeft);    
+    
+    <span style="color: #CC6600;">if</span> (lcdColPosition &lt; LCDCOLSIZE) {    <span style="color: #7E7E7E;">// If we
+haven't shown col-size characters (e.g., 16)</span>
+        tempBuffer[lcdColPosition]  =  ch;        <span style="color: #7E7E7E;">// just put
+them on the screen</span>
+        lcd.setCursor(lcdColPosition++,  1);
+        lcd.<span style="color: #CC6600;">write</span>(ch);
+    }  <span style="color: #CC6600;">else</span> {                              <span style="color: #7E7E7E;">// If we
+have shown more, scroll the message as the chars come in</span>
+        memmove(tempBuffer,  &amp;tempBuffer[1],  LCDCOLSIZE);
+        tempBuffer[LCDCOLSIZE  -  1]  =  ch;
+        lcd.setCursor(0,  1);
+        lcd.<span style="color: #CC6600;">write</span>(tempBuffer);   
+    }
+}
+
+    
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  polls  the  keyboard  looking  for  a  keystroke.  If  a  character  is  available,  it  is  added  to  the  </span>
+<span style="color:
+#7E7E7E;">  *  keyboard  input  buffer.  The  inline  modifier  is  a  hint  to  the  compiler  to  generate  inline  code  if  possible,</span>
+<span style="color: #7E7E7E;">  *  to  improve  the  performance  of  the  method.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+inline  <span style="color: #CC6600;">void</span> ps2poll()
+{
+    <span style="color: #CC6600;">char</span> ch;
+    <span style="color: #CC6600;">int</span> autoSendFlag = 0;
+    
+    <span style="color: #CC6600;">while</span> (kbd.<span style="color: #CC6600;">available</span>()) {
+        
+        <span style="color: #CC6600;">if</span> (((bufferTail + 1) % QUEUESIZE) == bufferHead) {	<span
+style="color: #7E7E7E;">// is buffer full ?</span>
+            lcd.setCursor(0,  0);
+            lcd.<span style="color: #CC6600;">write</span>(buffFullError);
+#ifdef  DEBUG
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">println</span>(buffFullError);
+#endif
+            <span style="color: #CC6600;">break</span>;
+        }  <span style="color: #CC6600;">else</span> { 
+            ch  =  kbd.<span style="color: #CC6600;">read</span>();
+            ch  =  toupper(ch);
+#ifdef  DEBUG
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">print</span>(<span style="color: #006699;">"ch = "</span>);
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">println</span>(ch, <span style="color: #006699;">HEX</span>);
+#endif
+            <span style="color: #CC6600;">if</span> (ch == 0x7f) {
+#ifdef  DEBUG
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">println</span>(<span style="color: #006699;">"Read backspace"</span>);
+#endif
+                <span style="color: #CC6600;">continue</span>;
+            }
+#ifdef  DEBUG
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">println</span>(ch);
+#endif
+  
+            <span style="color: #CC6600;">switch</span> (ch) {
+                <span style="color: #CC6600;">case</span> ESCAPEKEY:
+<span style="color: #7E7E7E;">// case '\033':</span>
+                    BufferReset();
+                    ClearLCD();
+                    
+    #ifdef  DEBUG
+                    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">flush</span>();
+                    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">println</span>(<span style="color: #006699;">"== Buffer reset =="</span>);
+    #endif
+                    aborted  =  1;
+                    <span style="color: #CC6600;">break</span>;
+                <span style="color: #CC6600;">case</span> PERCENTKEY:
+                    BufferAdd(<span style="color: #006699;">"CQ CQ CQ DE W8TEE W8TEE W8TEE
+K\r\n"</span>);
+                    <span style="color: #CC6600;">break</span>;
+                <span style="color: #CC6600;">case</span> <span style="color: #006699;">'('</span>:
+<span style="color: #7E7E7E;">// Start buffering without transmitting</span>
+                    bufferActive  =  0;
+                    DelayedTransmit();
+                    <span style="color: #CC6600;">return</span>;
+                <span style="color: #CC6600;">case</span> <span style="color: #006699;">'#'</span>:
+<span style="color: #7E7E7E;">// Change keying speed</span>
+                    ChangeSendingSpeed();
+                    speedChange  =  <span style="color: #CC6600;">true</span>;
+                    <span style="color: #CC6600;">break</span>;
+                <span style="color: #CC6600;">case</span> <span style="color: #006699;">'~'</span>:
+<span style="color: #7E7E7E;">// Change sidetone. Default is no tone (0)</span>
+                    sideTone  =  !sideTone;
+                    <span style="color: #CC6600;">return</span>;
+                <span style="color: #CC6600;">case</span> <span style="color: #006699;">'*'</span>:
+<span style="color: #7E7E7E;">// Generate random letters and numbers</span>
+                                                              <span
+style="color: #7E7E7E;">// Left as exercise for reader!!</span>
+                    <span style="color: #CC6600;">break</span>;
+                <span style="color: #CC6600;">default</span>:
+                    BufferAdd(ch);
+                    <span style="color: #CC6600;">break</span>;
+            }
+            ShowKeystrokes(ch);        
+        }
+    }
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  generates  a  delay  based  on  the  millis()  method  call.  This  is  the  preferred  way  to  perform  a</span>
+<span style="color:
+#7E7E7E;">  *  delay  because  it  doesn't  put  the  board  to  sleep  during  the  delay.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color:
+#7E7E7E;">  *  unsigned  ling  ms        the  number  of  milliseconds  to  delay</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> mydelay(<span style="color: #CC6600;">unsigned</span> <span style="color:
+#CC6600;">long</span> ms)
+{
+    <span style="color: #CC6600;">unsigned</span> <span style="color: #CC6600;">long</span> t = <span style="color:
+#CC6600;">millis</span>();
+    <span style="color: #CC6600;">while</span> (<span style="color: #CC6600;">millis</span>()-t &lt; ms) {
+        ps2poll();
+    }
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  generates  a  tone  if  speakers  are  hooked  to  the  system.  The  TONEPIN  value  determines  which  pin</span>
+<span style="color: #7E7E7E;">  *  is  used  to  generate  the  tone.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> scale()
+{
+    <span style="color: #CC6600;">long</span> f = 220L;
+    <span style="color: #CC6600;">int</span> i;
+
+    <span style="color: #CC6600;">for</span> (i=0; i&lt;=12; i++) {
+        <span style="color: #CC6600;">tone</span>(TONEPIN, (<span style="color: #CC6600;">int</span>)f);
+        f  *=  1059L;
+        f  /=  1000L;
+#ifdef  DEBUG
+        <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">println</span>(f);
+#endif
+        <span style="color: #CC6600;">delay</span>(300);
+    }
+    <span style="color: #CC6600;">noTone</span>(TONEPIN);     
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  generates  a  single  dit  in  the  sequence  necessary  to  form  a  character  in  Morse  Code.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> dit()
+{  
+    <span style="color: #CC6600;">if</span> (sideTone) {
+        <span style="color: #CC6600;">digitalWrite</span>(LEDPIN, <span style="color: #006699;">HIGH</span>);
+        <span style="color: #CC6600;">tone</span>(TONEPIN, SIDETONEFREQ);
+        mydelay(ditlen);
+        <span style="color: #CC6600;">digitalWrite</span>(LEDPIN, <span style="color: #006699;">LOW</span>);
+        <span style="color: #CC6600;">noTone</span>(TONEPIN);
+        mydelay(ditlen);
+    }
+#ifdef  CHARSONLY
+    <span style="color: #CC6600;">return</span>;
+#endif
+
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">"."</span>);
+#endif  
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  generates  a  single  dah  in  the  sequence  necessary  to  form  a  character  in  Morse  Code.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> dah()
+{
+    <span style="color: #CC6600;">if</span> (sideTone) {
+        <span style="color: #CC6600;">digitalWrite</span>(LEDPIN, <span style="color: #006699;">HIGH</span>);
+        <span style="color: #CC6600;">tone</span>(TONEPIN, SIDETONEFREQ);
+        mydelay(3*ditlen);
+        <span style="color: #CC6600;">digitalWrite</span>(LEDPIN, <span style="color: #006699;">LOW</span>);
+        <span style="color: #CC6600;">noTone</span>(TONEPIN);
+        mydelay(ditlen);
+    }
+#ifdef  CHARSONLY
+    <span style="color: #CC6600;">return</span>;
+#endif
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">"_"</span>);
+#endif
+}
+
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  generates  the  necessary  dits  and  dahs  for  a  particular  code.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color:
+#7E7E7E;">  *  char  code        the  byte  code  for  the  letter  or  number  to  be  sent  as  take  from  the  ltab[]  or  ntab[]  arrays.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> sendcode(<span style="color: #CC6600;">char</span> code)
+{
+    <span style="color: #CC6600;">int</span> i;
+
+    <span style="color: #CC6600;">for</span> (i=7; i&gt;= 0; i--) {  <span style="color: #7E7E7E;">// Look for start
+bit</span>
+        <span style="color: #CC6600;">if</span> (code &amp; (1 &lt;&lt; i))
+            <span style="color: #CC6600;">break</span>;
+    }
+    <span style="color: #CC6600;">for</span> (i--; i&gt;= 0; i--) {  <span style="color: #7E7E7E;">// Remaining bits are the
+actual Morse code</span>
+        <span style="color: #CC6600;">if</span> (code &amp; (1 &lt;&lt; i))
+            dah();
+        <span style="color: #CC6600;">else</span>
+            dit();
+    }
+    mydelay(2*ditlen);	<span style="color: #7E7E7E;">// space between letters</span>
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">""</span>);
+#endif
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color: #7E7E7E;">  *  This  method  translates  and  sends  the  character.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color:
+#7E7E7E;">  *  char  ch            the  character  to  be  translated  and  sent</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *  void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> <span style="color: #CC6600;">send</span>(<span style="color: #CC6600;">char</span> ch)
+{
+    <span style="color: #CC6600;">int</span> index;
+
+    ch  =  toupper(ch);
+  
+    <span style="color: #CC6600;">if</span> (speedChange) {	            <span style="color: #7E7E7E;">// use new
+speed</span>
+        ditlen  =  1200  /  wordsPerMinute;		
+        speedChange  =  <span style="color: #CC6600;">false</span>;
+    }    
+    
+    <span style="color: #CC6600;">if</span> (isalpha(ch)) {      <span style="color: #7E7E7E;">// Is it an alpha
+character?</span>
+        index  =  ch  -  <span style="color: #006699;">'A'</span>;     <span style="color:
+#7E7E7E;">// Yep...Calculate an index into the letter array if a letter...</span>
+        sendcode(ltab[index]);
+        <span style="color: #CC6600;">return</span>;
+    }
+    <span style="color: #CC6600;">if</span> (isdigit(ch)) {      <span style="color: #7E7E7E;">// Is it a digit
+character?</span>
+        sendcode(ntab[ch-<span style="color: #006699;">'0'</span>]); <span style="color: #7E7E7E;">//
+Yep...Calculate an index into the numbers table if a number...</span>
+        <span style="color: #CC6600;">return</span>;
+    }  
+    <span style="color: #CC6600;">if</span> (ch == <span style="color: #006699;">' '</span> || ch == <span style="color:
+#006699;">'\r'</span> || ch == <span style="color: #006699;">'\n'</span>) {  <span style="color: #7E7E7E;">// Is it
+whitespace?</span>
+        mydelay(4  *  ditlen);                                                <span
+style="color: #7E7E7E;">// Yep.</span>
+        <span style="color: #CC6600;">return</span>;
+    }          
+                                                            
+    <span style="color: #CC6600;">switch</span> (ch) {                  <span style="color: #7E7E7E;">// Punctuation and
+special characters. NOTE; Tree depth is 6, so</span>
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">'.'</span>:                    <span
+style="color: #7E7E7E;">// characters max out at 7 dit/dah combinations</span>
+            sendcode(0b1010101);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">','</span>:
+            sendcode(0b1110011);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span>  <span style="color: #006699;">'!'</span>:
+            sendcode(0b1101011);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span>  <span style="color: #006699;">'?'</span>:
+            sendcode(0b1001100);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span>  <span style="color: #006699;">'/'</span>:
+            sendcode(0b110010);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span>  <span style="color: #006699;">'+'</span>:
+            sendcode(0b101010);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span>  <span style="color: #006699;">'-'</span>:
+            sendcode(0b1100001);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span>  <span style="color: #006699;">'='</span>:
+            sendcode(0b110001);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span>  <span style="color: #006699;">'@'</span>:               
+          sendcode(0b1011010);
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">'\''</span>:               <span
+style="color: #7E7E7E;">// ' apostrophe</span>
+            sendcode(0b1011110);
+            <span style="color: #CC6600;">break</span>; 
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">'('</span>: 
+            sendcode(0b110110);  
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">')'</span>: 
+            sendcode(0b1101101);  
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">':'</span>: 
+            sendcode(0b1111000);  
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">';'</span>: 
+            sendcode(0b1101010);  
+            <span style="color: #CC6600;">break</span>;
+        <span style="color: #CC6600;">case</span> <span style="color: #006699;">'"'</span>: 
+            sendcode(0b1010010);  
+            <span style="color: #CC6600;">break</span>;
+          
+        <span style="color: #CC6600;">default</span>:
+            <span style="color: #CC6600;">break</span>;
+    }
+
+#ifdef  DEBUG
+    <span style="color: #CC6600;">if</span> (!aborted) {
+        <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(ch);
+        <span style="color: #CC6600;">if</span> (ch == 13) 
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">print</span>((<span style="color: #CC6600;">char</span>) 10);
+    }
+#endif
+    aborted  =  0;
+}
+
+
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  flashes  the  LED  on  pin  13  if  the  input  buffer  is  close  to  being  full.</span>
+<span style="color: #7E7E7E;">  *</span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *      void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *      void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+
+<span style="color: #CC6600;">void</span> FlashBufferFullWarning()
+{
+    <span style="color: #CC6600;">int</span> i;
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">"************* Approaching buffer full =============="</span>);
+    <span style="color: #7E7E7E;">//Serial.println(longMessageProcessing);</span>
+#endif
+
+    <span style="color: #CC6600;">for</span> (i = 0; i &lt; 10; i++) {
+        <span style="color: #CC6600;">digitalWrite</span>(LEDPIN, <span style="color: #006699;">HIGH</span>);  <span
+style="color: #7E7E7E;">// Visual</span>
+        <span style="color: #CC6600;">delay</span>(100);
+        <span style="color: #CC6600;">digitalWrite</span>(LEDPIN, <span style="color: #006699;">LOW</span>);
+        <span style="color: #CC6600;">delay</span>(100);
+        <span style="color: #CC6600;">tone</span>(TONEPIN, SIDETONEFREQ);         <span style="color: #7E7E7E;">//
+Audio...if available</span>
+        <span style="color: #CC6600;">delay</span>(100);
+        <span style="color: #CC6600;">noTone</span>(TONEPIN);
+        <span style="color: #CC6600;">delay</span>(100);
+    }
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  method  buffer  all  keystrokes  after  reading  the  leading  '('  until  it  reads  a  ')'.  At  that</span>
+<span style="color: #7E7E7E;">  *  time,  the  buffer  is  sent  to  the  transmitter.</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *      void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color:
+#7E7E7E;">  *      int                    the  number  of  characters  buffered.</span>
+<span style="color: #7E7E7E;">  *****/</span>
+
+<span style="color: #CC6600;">int</span> DelayedTransmit()
+{
+    <span style="color: #CC6600;">char</span> ch;
+    <span style="color: #CC6600;">int</span> i;
+
+    memset(buff,  <span style="color: #006699;">'\0'</span>, sizeof(<span style="color: #CC6600;">char</span>));
+    
+    bufferTail  =  0;
+    BufferReset();                            <span style="color:
+#7E7E7E;">// Clear the buffer and start over...</span>
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">println</span>(<span style="color:
+#006699;">"####  in DelayedTransmit()"</span>);
+#endif                
+
+    <span style="color: #CC6600;">while</span> (<span style="color: #CC6600;">true</span>) {
+        <span style="color: #CC6600;">if</span> (kbd.<span style="color: #CC6600;">available</span>()) {
+            ch  =  kbd.<span style="color: #CC6600;">read</span>();
+            <span style="color: #CC6600;">if</span> (ch == ESCAPEKEY) {  <span style="color: #7E7E7E;">//
+They want to terminate message</span>
+                BufferReset();                <span style="color:
+#7E7E7E;">// Clear all and start over</span>
+                <span style="color: #CC6600;">return</span> 0;
+            }
+            <span style="color: #CC6600;">if</span> (ch == <span style="color: #006699;">'('</span>) {
+                BufferReset();                <span style="color:
+#7E7E7E;">// Clear all and start over</span>
+                <span style="color: #CC6600;">continue</span>;
+            }
+<span style="color: #7E7E7E;">//            ShowKeystrokes(ch);</span>
+            <span style="color: #7E7E7E;">//charCount++;</span>
+            <span style="color: #CC6600;">if</span> (ch == <span style="color: #006699;">')'</span> ||
+charCount == QUEUEMASK || ch == NEWLINE) { <span style="color: #7E7E7E;">// Is long message finished or terminated?</span>
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">"#### after closed:  charCount = "</span>);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">println</span>(charCount);
+#endif                
+                bufferActive  =  0;
+                lcdColPosition  =  0;
+                lcd.clear();
+                lcd.setCursor(0,1);
+                <span style="color: #CC6600;">for</span> (i = 0; i &lt; charCount; i++) {
+  #ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">"In for send[i] = "</span>);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(buff[i]);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">"  i = "</span>);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">println</span>(i);
+#endif                
+                    ShowKeystrokes(buff[i]);
+                    <span style="color: #CC6600;">send</span>(buff[i]);
+                }
+                BufferReset();                            <span
+style="color: #7E7E7E;">// Clear the buffer and start over...</span>
+                <span style="color: #CC6600;">break</span>;
+            }  <span style="color: #CC6600;">else</span> {
+#ifdef  DEBUG
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">"--&gt; charCount = "</span>);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(charCount);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">" character = "</span>);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">println</span>(ch);
+#endif                
+            ShowKeystrokes(ch);
+                buff[charCount++]  =  ch;
+                <span style="color: #CC6600;">if</span> (charCount &gt; (QUEUEMASK - 20)) {   <span
+style="color: #7E7E7E;">// Approaching full buffer</span>
+                    FlashBufferFullWarning();
+                }
+            }
+        }
+    }
+    <span style="color: #CC6600;">return</span> charCount;
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color:
+#7E7E7E;">  *  This  function  allows  the  sending  speed  to  change</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *      void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *      void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> ChangeSendingSpeed()
+{
+    <span style="color: #CC6600;">char</span> ch;
+    
+    <span style="color: #CC6600;">int</span> wereDone = 0;
+
+#ifdef  DEBUG    
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">print</span>(<span style="color:
+#006699;">" wordsPerMinute at start ="</span>);
+    <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color: #CC6600;">println</span>(wordsPerMinute);     
+#endif
+    <span style="color: #CC6600;">while</span> (<span style="color: #CC6600;">true</span>) {
+        <span style="color: #CC6600;">if</span> (kbd.<span style="color: #CC6600;">available</span>()) {
+            ch=kbd.<span style="color: #CC6600;">read</span>();
+#ifdef  DEBUG    
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">print</span>(<span style="color: #006699;">"Speed change ch ="</span>);
+            <span style="color: #CC6600;"><b>Serial</b></span>.<span style="color:
+#CC6600;">println</span>(ch);
+#endif
+            <span style="color: #CC6600;">switch</span> (ch) {
+                <span style="color: #CC6600;">case</span> <span style="color:
+#006699;">'&gt;'</span>:            <span style="color: #7E7E7E;">// Increase WPM by 1</span>
+                    wordsPerMinute++;
+                    <span style="color: #CC6600;">break</span>;
+                <span style="color: #CC6600;">case</span> <span style="color:
+#006699;">'&lt;'</span>:            <span style="color: #7E7E7E;">// Decrease WPM by 1</span>
+                    wordsPerMinute--;
+                    <span style="color: #CC6600;">break</span>;
+                <span style="color: #CC6600;">case</span> <span style="color: #006699;">'#'</span>:
+<span style="color: #7E7E7E;">// All changes are complete</span>
+                    wereDone  =  1;
+                    <span style="color: #CC6600;">break</span>;
+                <span style="color: #CC6600;">default</span>:
+                    <span style="color: #CC6600;">break</span>;
+            }
+        }
+        <span style="color: #CC6600;">if</span> (wereDone)
+            <span style="color: #CC6600;">break</span>;
+    }
+    ditlen  =  1200  /  wordsPerMinute;
+}
+
+<span style="color: #7E7E7E;">/*****</span>
+<span style="color: #7E7E7E;">  *  This  method  simply  clears  the  LCD  display</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Parameters:</span>
+<span style="color: #7E7E7E;">  *      void</span>
+<span style="color: #7E7E7E;">  *  </span>
+<span style="color: #7E7E7E;">  *  Return  value:</span>
+<span style="color: #7E7E7E;">  *      void</span>
+<span style="color: #7E7E7E;">  *****/</span>
+<span style="color: #CC6600;">void</span> ClearLCD()
+{
+    lcd.clear();
+    lcd.setCursor(0,  0);
+}
+</pre>
+
+</body>
+</html>
